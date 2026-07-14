@@ -179,3 +179,18 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Models
+/backend/models/*/*
+
+# llama-server
+/backend/llama-b9850-bin-win-vulkan-x64
+
+# notebooks chores
+notebooks/finetune-wav2vec2/train_set.7z
+notebooks/finetune-wav2vec2/train_set/wavs/*
+
+# Heavy dataset files
+text/corpus.txt
+text/randomqa.txt
+notebooks/finetuned_ViT5/*.json
