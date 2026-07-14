@@ -152,43 +152,53 @@ def main():
     
     print(f"Loaded total of {len(whitelist)} drug/chemical words in whitelist.")
     
-    # 3. Read and split drugs.txt
-    input_file = 'drugs.txt'
-    output_file = 'drugs_candidates.txt'
+    # 3. Read existing drugs.txt as base dictionary (Requirements 1 & 7 & 9)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    drugs_file_path = os.path.join(script_dir, '..', 'text', 'drugs.txt')
+    if not os.path.exists(drugs_file_path):
+        drugs_file_path = 'drugs.txt'
+        
+    existing_entries = []
+    existing_lower_set = set()
+    if os.path.exists(drugs_file_path):
+        with open(drugs_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped:
+                    existing_entries.append(stripped)
+                    existing_lower_set.add(stripped.lower())
+    print(f"Loaded {len(existing_entries)} existing drug entries from {drugs_file_path}.")
     
-    print("Regenerating raw drugs.txt using extract_drugs.py...")
+    # 4. Scan both corpus and train.csv via extract_drugs.extract_candidates() (Requirements 2 & 3)
+    print("Scanning corpus.txt and train.csv for candidate words via extract_drugs...")
     import extract_drugs
-    extract_drugs.main()
+    phrases = extract_drugs.extract_candidates()
     
-    if not os.path.exists(input_file):
-        print(f"Error: {input_file} not found.")
-        return
-        
-    with open(input_file, 'r', encoding='utf-8') as f:
-        phrases = [line.strip() for line in f if line.strip()]
-        
     # Split phrases into unique single words
     words_set = set()
     for phrase in phrases:
         words_set.update(phrase.split())
         
     words = sorted(list(words_set))
-    print(f"Original unique single words count: {len(words)}")
+    print(f"Candidate unique words/terms count from scan: {len(words)}")
     
-    # Drug suffixes regex
+    # Drug suffixes regex (Requirement 4)
     suffix_regex = re.compile(
         r'(ol|in|ine|one|ide|vir|pam|lam|pril|sartan|statin|cef|cin|cillin|mab|zole|pine|'
         r'ate|ole|tadine|zine|mine|drine|tinib|ciclib|parib|asone|olone|nide|setron|'
-        r'gen|dol|col|gan|can|bar|bac|pin|tin)$'
+        r'gen|dol|col|gan|can|bar|bac|pin|tin|triptan|afil|lukast|coxib|prazole|'
+        r'glitazone|floxacin|mycin|navir|caine|fenac|fen|benz|dronate|pram|tidine|'
+        r'uridine|abine|imus|ase|mide|done|tide|xaban|grel|cept|prost|thiazide|bicin|'
+        r'platin|poside|rubicin|taxel|vudine|zolin|zoline|flurane|zepam|zodone)$'
     )
     
     filtered_words = []
     for w in words:
-        w_lower = w.lower()
+        w_lower = w.lower().strip()
         w_clean = re.sub(r'[^a-z]', '', w_lower)
         
-        # 1. Filter out words containing digits
-        if re.search(r'[0-9]', w_lower):
+        # 1. Filter out words containing digits or non-alphanumeric
+        if re.search(r'[0-9]', w_lower) or not re.match(r'^[a-z0-9\s-]+$', w_lower):
             continue
             
         # 2. Filter out short words
@@ -196,32 +206,53 @@ def main():
             continue
             
         # 3. Whitelist check (ALWAYS KEEP if in whitelist)
-        if w_clean in whitelist:
-            filtered_words.append(w)
+        if w_clean in whitelist or w_lower in whitelist:
+            filtered_words.append(w_lower)
             continue
             
         # 4. Blacklist check (REMOVE if in blacklist)
-        if w_clean in blacklist:
+        if w_clean in blacklist or w_lower in blacklist:
             continue
             
         # 5. Suffix check (KEEP if it matches typical drug ending)
         if suffix_regex.search(w_clean):
-            filtered_words.append(w)
+            filtered_words.append(w_lower)
             continue
             
-    # Sort and unique
+    # Sort and unique candidate terms
     sorted_filtered = sorted(list(set(filtered_words)))
     
-    # Overwrite drugs.txt
-    with open(input_file, 'w', encoding='utf-8') as f:
-        for w in sorted_filtered:
+    # 5. Check against base dictionary (Requirements 6 & 10)
+    new_candidates_set = set()
+    for w in sorted_filtered:
+        if w not in existing_lower_set:
+            new_candidates_set.add(w)
+            
+    # 6. Sort only newly discovered names alphabetically (Requirement 11)
+    sorted_new_drugs = sorted(list(new_candidates_set))
+    
+    # 7. Append only newly discovered drug names without overwriting (Requirements 7 & 8 & 9)
+    if sorted_new_drugs and os.path.exists(drugs_file_path):
+        with open(drugs_file_path, 'r+', encoding='utf-8') as f:
+            content = f.read()
+            if content and not content.endswith('\n'):
+                f.write('\n')
+        with open(drugs_file_path, 'a', encoding='utf-8') as f:
+            for w in sorted_new_drugs:
+                f.write(w + '\n')
+                
+    output_candidates_file = os.path.join(script_dir, 'drugs_candidates.txt')
+    with open(output_candidates_file, 'w', encoding='utf-8') as f:
+        for w in sorted_new_drugs:
             f.write(w + '\n')
             
-    with open(output_file, 'w', encoding='utf-8') as f:
-        for w in sorted_filtered:
-            f.write(w + '\n')
-                
-    print(f"Done! Overwrote drugs.txt with {len(sorted_filtered)} highly refined drug/medical terms.")
+    print("\n" + "=" * 50)
+    print(f"Number of new drug names found: {len(sorted_new_drugs)}")
+    print(f"Number appended: {len(sorted_new_drugs)}")
+    sample_size = min(30, len(sorted_new_drugs))
+    sample = sorted_new_drugs[:sample_size] if sample_size > 0 else []
+    print(f"Sample of newly added names ({sample_size}): {sample}")
+    print("=" * 50)
 
 if __name__ == '__main__':
     main()
