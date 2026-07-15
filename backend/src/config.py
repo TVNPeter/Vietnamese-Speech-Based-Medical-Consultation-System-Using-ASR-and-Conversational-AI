@@ -25,10 +25,16 @@ class Settings(BaseSettings):
     FAISS_INDEX_PATH: str = "data/faiss_index.faiss"
     DOC_METADATA_PATH: str = "data/doc_metadata.json"
     DOCUMENTS_DIR: str = "documents"
+    SEMANTIC_TOP_K: int = 5
+    BM25_TOP_K: int = 5
+    RAG_TOP_K: int = 5
+    RRF_K: int = 60
 
     # ASR / TTS
     ASR_MODEL_PATH: str = "models/asr"
     TTS_MODEL_PATH: str = "models/tts"
+    TTS_ENABLED: bool = True
+    TTS_VOICE: str = "Trúc Ly"
 
     # HuggingFace
     HF_TOKEN: str = ""

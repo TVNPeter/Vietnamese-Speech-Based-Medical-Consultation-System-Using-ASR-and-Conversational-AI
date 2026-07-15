@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from src.dependencies import get_llm, get_rag
 from src.prompts import RAG_USER_TEMPLATE, SYSTEM_PROMPT
-from src.schemas import ChatRequest
+from src.schemas import ChatRequest, RAGReindexResponse
 from src.services.llm import LLMService
 from src.services.rag import RAGService
 
@@ -92,3 +92,15 @@ async def get_stats(rag: RAGService = Depends(get_rag)) -> dict:
             "index_loaded": rag.document_count > 0,
         }
     }
+
+
+@router.post("/rag/reindex", response_model=RAGReindexResponse)
+async def reindex_documents(
+    rag: RAGService = Depends(get_rag),
+) -> RAGReindexResponse:
+    """Rebuild vector and BM25 indexes after documents are updated."""
+    document_count, chunk_count = await rag.rebuild()
+    return RAGReindexResponse(
+        document_count=document_count,
+        chunk_count=chunk_count,
+    )

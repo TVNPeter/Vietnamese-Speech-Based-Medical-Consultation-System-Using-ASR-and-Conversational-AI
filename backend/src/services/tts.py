@@ -1,6 +1,10 @@
-"""TTS service: text-to-speech synthesis."""
+"""VieNeu-TTS v3 Turbo synthesis service."""
 
+import asyncio
 import logging
+import tempfile
+import threading
+from pathlib import Path
 
 from src.config import settings
 
@@ -8,25 +12,34 @@ logger = logging.getLogger(__name__)
 
 
 class TTSService:
-    """Text-to-Speech synthesis service."""
+    """Lazy, process-local VieNeu engine used by the speaker button."""
 
     def __init__(self) -> None:
-        self._model_path = settings.resolve(settings.TTS_MODEL_PATH)
         self._model: object | None = None
+        self._lock = threading.Lock()
 
-    def ensure_model_loaded(self) -> None:
-        """Verify the TTS model directory exists."""
-        if not self._model_path.is_dir():
-            raise FileNotFoundError(
-                f"TTS model directory not found: {self._model_path}. "
-                "Place your TTS model files in this directory."
-            )
+    def _load_model(self) -> object:
+        if not settings.TTS_ENABLED:
+            raise RuntimeError("TTS is disabled. Set TTS_ENABLED=true to enable it.")
+        if self._model is None:
+            from vieneu import Vieneu
+
+            logger.info("Loading VieNeu-TTS v3 Turbo on the first request.")
+            self._model = Vieneu()
+        return self._model
 
     async def synthesize(self, text: str) -> bytes:
-        """Synthesize text into audio bytes (WAV format)."""
-        self.ensure_model_loaded()
-        raise NotImplementedError(
-            "TTS model not yet integrated. "
-            f"Place model files in {self._model_path} and implement "
-            "synthesis."
-        )
+        """Synthesize a response into a WAV byte stream without blocking FastAPI."""
+        return await asyncio.to_thread(self._synthesize_blocking, text)
+
+    def _synthesize_blocking(self, text: str) -> bytes:
+        with self._lock:
+            model = self._load_model()
+            audio = model.infer(text=text, voice=settings.TTS_VOICE)  # type: ignore[attr-defined]
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                output_path = Path(handle.name)
+            try:
+                model.save(audio, str(output_path))  # type: ignore[attr-defined]
+                return output_path.read_bytes()
+            finally:
+                output_path.unlink(missing_ok=True)
