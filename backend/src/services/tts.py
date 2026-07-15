@@ -35,7 +35,8 @@ class TTSService:
     def _synthesize_blocking(self, text: str) -> bytes:
         with self._lock:
             model = self._load_model()
-            audio = model.infer(text=text, voice=settings.TTS_VOICE)  # type: ignore[attr-defined]
+            voice = model.get_preset_voice(settings.TTS_VOICE)  # type: ignore[attr-defined]
+            audio = model.infer(text=text, voice=voice)  # type: ignore[attr-defined]
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
                 output_path = Path(handle.name)
             try:
