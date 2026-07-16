@@ -13,6 +13,53 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _custom_wav2vec2_class():
+    """Return the architecture used when the medical ASR checkpoint was trained."""
+    from collections import OrderedDict
+
+    from torch import nn
+    from transformers import Wav2Vec2Model, Wav2Vec2PreTrainedModel
+
+    class CustomWav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
+        all_tied_weights_keys = {}
+
+        def __init__(self, config):
+            super().__init__(config)
+            self.wav2vec2 = Wav2Vec2Model(config)
+            self.dropout = nn.Dropout(config.final_dropout)
+            self.feature_transform = nn.Sequential(
+                OrderedDict(
+                    [
+                        ("linear1", nn.Linear(config.hidden_size, config.hidden_size)),
+                        ("bn1", nn.BatchNorm1d(config.hidden_size)),
+                        ("activation1", nn.LeakyReLU()),
+                        ("drop1", nn.Dropout(config.final_dropout)),
+                        ("linear2", nn.Linear(config.hidden_size, config.hidden_size)),
+                        ("bn2", nn.BatchNorm1d(config.hidden_size)),
+                        ("activation2", nn.LeakyReLU()),
+                        ("drop2", nn.Dropout(config.final_dropout)),
+                        ("linear3", nn.Linear(config.hidden_size, config.hidden_size)),
+                        ("bn3", nn.BatchNorm1d(config.hidden_size)),
+                        ("activation3", nn.LeakyReLU()),
+                        ("drop3", nn.Dropout(config.final_dropout)),
+                    ]
+                )
+            )
+            self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
+
+        def forward(self, input_values):
+            hidden_states = self.dropout(self.wav2vec2(input_values).last_hidden_state)
+            batch_size, sequence_length, hidden_size = hidden_states.shape
+            hidden_states = self.feature_transform(
+                hidden_states.reshape(batch_size * sequence_length, hidden_size)
+            )
+            return self.lm_head(
+                hidden_states.reshape(batch_size, sequence_length, hidden_size)
+            )
+
+    return CustomWav2Vec2ForCTC
+
+
 class ASRService:
     """Lazy, process-local implementation of the medical speech pipeline."""
 
@@ -22,7 +69,7 @@ class ASRService:
         self._vit5_path = settings.resolve(settings.ASR_VIT5_MODEL_PATH)
         self._hotwords_path = settings.resolve(settings.ASR_HOTWORDS_PATH)
         self._lock = threading.Lock()
-        self._asr_session: object | None = None
+        self._asr_model: object | None = None
         self._vit5_encoder: object | None = None
         self._vit5_decoder: object | None = None
         self._ctc_decoder: object | None = None
@@ -33,7 +80,7 @@ class ASRService:
 
     def _require_files(self) -> None:
         required_paths = (
-            self._model_path / "model.onnx",
+            self._model_path / "model.safetensors",
             self._model_path / "vocab.json",
             self._vit5_path / "encoder_model.onnx",
             self._vit5_path / "decoder_model.onnx",
@@ -45,7 +92,7 @@ class ASRService:
             raise FileNotFoundError("Missing ASR assets: " + ", ".join(missing))
 
     def _load_models(self) -> None:
-        if self._asr_session is not None:
+        if self._asr_model is not None:
             return
 
         self._require_files()
@@ -53,6 +100,7 @@ class ASRService:
             import onnxruntime as ort
             from pyctcdecode import build_ctcdecoder
             from tokenizers import Tokenizer
+            import torch
         except ImportError as error:
             raise RuntimeError(
                 "ASR runtime dependencies are missing. Run `uv sync` in backend/."
@@ -73,16 +121,9 @@ class ASRService:
                     [*dll_directories, os.environ.get("PATH", "")]
                 )
             providers.insert(0, "CUDAExecutionProvider")
-        logger.info(
-            "Loading Wav2Vec2 ONNX and ViT5 ONNX models for ASR with %s.",
-            providers[0],
-        )
-        wav2vec2_providers = providers if settings.ASR_WAV2VEC2_USE_GPU else [
-            "CPUExecutionProvider"
-        ]
-        self._asr_session = ort.InferenceSession(
-            str(self._model_path / "model.onnx"), providers=wav2vec2_providers
-        )
+        device = "cuda" if settings.ASR_WAV2VEC2_USE_GPU and torch.cuda.is_available() else "cpu"
+        logger.info("Loading custom Wav2Vec2 CTC on %s and ViT5 on %s.", device, providers[0])
+        self._asr_model = _custom_wav2vec2_class().from_pretrained(self._model_path).to(device).eval()
         self._vit5_encoder = ort.InferenceSession(
             str(self._vit5_path / "encoder_model.onnx"),
             providers=providers,
@@ -141,9 +182,7 @@ class ASRService:
             }.get(token, token)
             if token == "<unk>":
                 labels[index] = "\u2047"
-        for index, token in enumerate(
-            ("\ue000", "\ue001"), start=max(vocab.values()) + 1
-        ):
+        for index, token in enumerate(("<s>", "</s>"), start=max(vocab.values()) + 1):
             labels[index] = token
         return labels
 
@@ -199,11 +238,13 @@ class ASRService:
         return (waveform - waveform.mean()) / np.sqrt(waveform.var() + 1e-7)
 
     def _run_wav2vec2(self, waveform):
-        import numpy as np
+        import torch
 
-        return self._asr_session.run(  # type: ignore[union-attr]
-            ["logits"], {"input_values": np.expand_dims(waveform, axis=0)}
-        )[0]
+        device = next(self._asr_model.parameters()).device  # type: ignore[union-attr]
+        inputs = torch.from_numpy(waveform).unsqueeze(0).to(device)
+        with torch.inference_mode():
+            logits = self._asr_model(inputs)  # type: ignore[union-attr]
+        return logits.detach().cpu().numpy()
 
     def _decode_ctc(self, logits) -> str:
         text = self._ctc_decoder.decode(  # type: ignore[union-attr]

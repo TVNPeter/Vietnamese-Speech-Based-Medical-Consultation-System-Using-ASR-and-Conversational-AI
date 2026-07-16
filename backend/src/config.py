@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     RRF_K: int = 60
 
     # ASR: Wav2Vec2 CTC -> KenLM + drug hotwords -> ViT5 rewrite
-    ASR_MODEL_PATH: str = "models/asr/onnx"
+    ASR_MODEL_PATH: str = "../models/asr/best_model_hf"
     ASR_KENLM_PATH: str = "models/kenlm/kenlm_vi_medical_4gram.bin"
     ASR_VIT5_MODEL_PATH: str = "models/vit5/onnx"
     ASR_HOTWORDS_PATH: str = "../text/drugs.txt"

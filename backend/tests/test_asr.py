@@ -9,7 +9,7 @@ from src.services.asr import ASRService
 
 
 class ASRPreparationTests(unittest.TestCase):
-    def test_ctc_labels_cover_onnx_vocab_size(self) -> None:
+    def test_ctc_labels_cover_checkpoint_vocab_size(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             model_dir = Path(directory)
             vocab_path = model_dir / "vocab.json"
@@ -23,12 +23,14 @@ class ASRPreparationTests(unittest.TestCase):
 
             labels = ASRService._load_ctc_labels(vocab_path)
 
-        self.assertEqual(labels, [" ", "a", "⁇", "", "\ue000", "\ue001"])
+        self.assertEqual(labels, [" ", "a", "\u2047", "", "<s>", "</s>"])
 
     def test_hotwords_are_normalized_and_deduplicated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             hotwords_path = Path(directory) / "drugs.txt"
-            hotwords_path.write_text("Aspirin\n\naspirin\nParacetamol\n", encoding="utf-8")
+            hotwords_path.write_text(
+                "Aspirin\n\naspirin\nParacetamol\n", encoding="utf-8"
+            )
 
             hotwords = ASRService._read_hotwords(hotwords_path)
 
