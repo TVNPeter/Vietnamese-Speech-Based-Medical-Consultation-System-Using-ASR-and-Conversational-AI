@@ -42,6 +42,7 @@ function stripMarkdown(text) {
     .replace(/```[\s\S]*?```/g, '')
     .replace(/[#*_>`]/g, '')
     .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/\[(?:\d+(?:\s*[,–-]\s*\d+)*)\]/g, '')
     .trim();
 }
 
@@ -55,6 +56,11 @@ function Sources({ sources }) {
         {sources.map((source) => (
           <li key={`${source.index}-${source.title}`}>
             <strong>{source.title || 'Tài liệu y khoa'}</strong>
+            {source.url && (
+              <a href={source.url} target="_blank" rel="noreferrer">
+                Mở nguồn
+              </a>
+            )}
             {source.content && <span>{source.content}</span>}
           </li>
         ))}

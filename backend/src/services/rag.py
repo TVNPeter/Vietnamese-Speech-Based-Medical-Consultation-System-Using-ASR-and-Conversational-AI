@@ -1,11 +1,14 @@
 """Hybrid RAG service: FAISS semantic search plus BM25 keyword search."""
 
 import csv
+import difflib
 import hashlib
 import json
 import logging
 import pickle
 import re
+import unicodedata
+from collections import Counter, defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ from rank_bm25 import BM25Okapi
 
 from src.config import settings
 from src.schemas import RetrievedChunk
+from src.services.web_search import TavilyMedicalSearch
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,6 @@ _MOJIBAKE_MARKERS = (
     "\u00c2",
     "\u00e2\u0080",
 )
-
 
 def _mojibake_score(value: str) -> int:
     return sum(value.count(marker) for marker in _MOJIBAKE_MARKERS)
@@ -57,6 +60,16 @@ def _repair_mojibake(value: str) -> str:
     except UnicodeDecodeError:
         return value
     return repaired if _mojibake_score(repaired) < _mojibake_score(value) else value
+
+
+def _fold_token(token: str) -> str:
+    """Compare Vietnamese tokens without case or diacritics."""
+    decomposed = unicodedata.normalize("NFD", token.lower())
+    return "".join(
+        character
+        for character in decomposed
+        if unicodedata.category(character) != "Mn"
+    ).replace("đ", "d")
 
 
 def _as_text(value: Any) -> str:
@@ -114,6 +127,9 @@ class RAGService:
         self._bm25: BM25Okapi | None = None
         self._chroma_client: Any | None = None
         self._chroma_collection: Any | None = None
+        self._vocabulary: dict[str, str] = {}
+        self._medical_terms: dict[str, str] = {}
+        self._web_search = TavilyMedicalSearch()
 
     def _load_embedding_model(self) -> None:
         if self._embedding_model is not None:
@@ -187,6 +203,7 @@ class RAGService:
         self._chroma_collection = collection
         self._index = None
         self._bm25 = bm25_index
+        self._build_query_vocabulary(bundle["tokenized"], metadatas)
         self._chunks = [
             {
                 "id": str(document_id),
@@ -203,6 +220,78 @@ class RAGService:
             chroma_dir,
         )
         return True
+
+    def _build_query_vocabulary(
+        self, tokenized_documents: list[list[str]], metadatas: list[dict[str, Any]]
+    ) -> None:
+        """Build a local spelling/accent map without any external service."""
+        token_counts: dict[str, Counter[str]] = defaultdict(Counter)
+        for document_tokens in tokenized_documents:
+            for token in document_tokens:
+                if len(token) >= 2:
+                    token_counts[_fold_token(token)][token] += 1
+        self._vocabulary = {
+            folded: values.most_common(1)[0][0]
+            for folded, values in token_counts.items()
+        }
+
+        medical_terms: dict[str, str] = {}
+        for metadata in metadatas:
+            entity = metadata.get("entity")
+            if not isinstance(entity, str):
+                continue
+            for token in self._tokenize(entity):
+                if len(token) >= 4:
+                    medical_terms[_fold_token(token)] = token
+        self._medical_terms = medical_terms
+
+    def _prepare_prebuilt_query(self, text: str) -> tuple[str, set[str]]:
+        """Correct common local spelling/accent variations before retrieval."""
+        if not self._vocabulary:
+            return text, set()
+
+        corrected_terms: set[str] = set()
+
+        def replace(match: re.Match[str]) -> str:
+            original = match.group(0)
+            folded = _fold_token(original)
+            replacement = self._vocabulary.get(folded)
+            if len(folded) >= 5 and folded not in self._medical_terms:
+                closest = difflib.get_close_matches(
+                    folded, self._medical_terms, n=1, cutoff=0.84
+                )
+                if closest:
+                    replacement = self._medical_terms[closest[0]]
+            if not replacement:
+                return original
+            if _fold_token(replacement) in self._medical_terms:
+                corrected_terms.add(_fold_token(replacement))
+            return replacement
+
+        corrected = re.sub(r"[\w\u00c0-\u1ef9]+", replace, text, flags=re.UNICODE)
+        return corrected, corrected_terms
+
+    @staticmethod
+    def _contains_medical_term(content: str, terms: set[str]) -> bool:
+        question, separator, _ = content.partition("Answer:")
+        searchable_content = question if separator and question.startswith("Question:") else content
+        folded_content = _fold_token(searchable_content)
+        return any(term in folded_content for term in terms)
+
+    @staticmethod
+    def _source_reliability_bonus(source: str) -> float:
+        """Prefer locally indexed primary drug-information sources over QA examples."""
+        normalized_source = source.casefold()
+        trusted_hints = [
+            hint.strip().casefold()
+            for hint in settings.RAG_TRUSTED_SOURCE_HINTS.split(",")
+            if hint.strip()
+        ]
+        return (
+            0.01
+            if any(hint in normalized_source for hint in trusted_hints)
+            else 0.0
+        )
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -396,35 +485,53 @@ class RAGService:
 
     def _query_prebuilt_chroma(self, text: str) -> list[RetrievedChunk]:
         """Fuse packaged Chroma semantic ranks and packaged BM25 lexical ranks."""
-        query_embedding = self._embedding_model.get_query_embedding(text)  # type: ignore[union-attr]
+        retrieval_query, medical_terms = self._prepare_prebuilt_query(text)
+        query_embedding = self._embedding_model.get_query_embedding(retrieval_query)  # type: ignore[union-attr]
         result = self._chroma_collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(settings.SEMANTIC_TOP_K, len(self._chunks)),
+            n_results=min(settings.SEMANTIC_TOP_K * 3, len(self._chunks)),
             include=["documents", "metadatas"],
         )
         fused: dict[str, dict[str, str | float]] = {}
-        for rank, (document_id, document, metadata) in enumerate(
+        semantic_rank = 0
+        for document_id, document, metadata in (
             zip(
                 result["ids"][0],
                 result["documents"][0],
                 result["metadatas"][0],
                 strict=True,
-            ),
-            start=1,
+            )
         ):
+            if medical_terms and not self._contains_medical_term(
+                str(document), medical_terms
+            ):
+                continue
+            semantic_rank += 1
+            if semantic_rank > settings.SEMANTIC_TOP_K:
+                break
             fused[str(document_id)] = {
                 "content": str(document),
                 "source": str(metadata.get("source", "unknown")),
-                "score": 1 / (settings.RRF_K + rank),
+                "score": 1 / (settings.RRF_K + semantic_rank),
             }
 
         if self._bm25 is not None:
-            lexical_scores = self._bm25.get_scores(self._tokenize(text))
-            lexical_indices = np.argsort(lexical_scores)[::-1][: settings.BM25_TOP_K]
-            for rank, index in enumerate(lexical_indices, start=1):
+            lexical_scores = self._bm25.get_scores(self._tokenize(retrieval_query))
+            lexical_indices = np.argsort(lexical_scores)[::-1][
+                : settings.BM25_TOP_K * 3
+            ]
+            lexical_rank = 0
+            for index in lexical_indices:
                 if lexical_scores[index] <= 0:
                     continue
                 chunk = self._chunks[int(index)]
+                if medical_terms and not self._contains_medical_term(
+                    chunk["content"], medical_terms
+                ):
+                    continue
+                lexical_rank += 1
+                if lexical_rank > settings.BM25_TOP_K:
+                    break
                 document_id = chunk["id"]
                 if document_id not in fused:
                     fused[document_id] = {
@@ -433,11 +540,14 @@ class RAGService:
                         "score": 0.0,
                     }
                 fused[document_id]["score"] = float(fused[document_id]["score"]) + 1 / (
-                    settings.RRF_K + rank
+                    settings.RRF_K + lexical_rank
                 )
 
         ranked = sorted(
-            fused.values(), key=lambda item: float(item["score"]), reverse=True
+            fused.values(),
+            key=lambda item: float(item["score"])
+            + self._source_reliability_bonus(str(item["source"])),
+            reverse=True,
         )[: settings.RAG_TOP_K]
         return [
             RetrievedChunk(
@@ -485,6 +595,99 @@ class RAGService:
             )
             for index in ranked_indices
         ]
+
+    @staticmethod
+    def _evidence_content(content: str) -> str:
+        """Use the question half of QA samples to reject answer-only keyword matches."""
+        question, separator, _ = content.partition("Answer:")
+        return question if separator and question.startswith("Question:") else content
+
+    def _evidence_score(
+        self,
+        query: str,
+        chunk: RetrievedChunk,
+        medical_terms: set[str],
+    ) -> float:
+        """Estimate whether one retrieved chunk can safely support the query."""
+        evidence_text = self._evidence_content(chunk.content)
+        folded_content = _fold_token(evidence_text)
+        query_tokens = {
+            _fold_token(token)
+            for token in self._tokenize(query)
+            if len(_fold_token(token)) >= 3
+        }
+        content_tokens = {
+            _fold_token(token)
+            for token in self._tokenize(evidence_text)
+            if len(_fold_token(token)) >= 3
+        }
+        token_overlap = len(query_tokens & content_tokens) / max(len(query_tokens), 1)
+
+        if medical_terms:
+            matched_terms = sum(term in folded_content for term in medical_terms)
+            if not matched_terms:
+                return 0.0
+            entity_coverage = matched_terms / len(medical_terms)
+            return min(1.0, 0.65 * entity_coverage + 0.35 * token_overlap)
+        return token_overlap
+
+    def _rank_by_evidence(
+        self, query: str, chunks: list[RetrievedChunk]
+    ) -> tuple[list[RetrievedChunk], list[float]]:
+        normalized_query, medical_terms = self._prepare_prebuilt_query(query)
+        ranked = [
+            (
+                self._evidence_score(normalized_query, chunk, medical_terms),
+                position,
+                chunk,
+            )
+            for position, chunk in enumerate(chunks)
+        ]
+        ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        return (
+            [chunk.model_copy(update={"score": score}) for score, _, chunk in ranked],
+            [score for score, _, _ in ranked],
+        )
+
+    async def query_with_fallback(self, text: str) -> list[RetrievedChunk]:
+        """Use Tavily only when local hybrid retrieval lacks focused evidence."""
+        local_chunks = self.query(text)
+        ranked_local, local_scores = self._rank_by_evidence(text, local_chunks)
+        relevant_scores = [
+            score
+            for score in local_scores
+            if score >= settings.RAG_EVIDENCE_RELEVANCE_FLOOR
+        ]
+        relevant_local = [
+            chunk
+            for chunk, score in zip(ranked_local, local_scores, strict=True)
+            if score >= settings.RAG_EVIDENCE_RELEVANCE_FLOOR
+        ]
+        local_is_sufficient = (
+            len(relevant_scores) >= settings.RAG_MIN_EVIDENCE_CHUNKS
+            and sum(relevant_scores) / len(relevant_scores)
+            >= settings.RAG_MIN_EVIDENCE_SCORE
+        )
+        if local_is_sufficient or not self._web_search.is_enabled:
+            return relevant_local[: settings.RAG_TOP_K]
+
+        normalized_query, _ = self._prepare_prebuilt_query(text)
+        logger.info(
+            "Local RAG evidence is insufficient (%d relevant chunks); using Tavily fallback.",
+            len(relevant_scores),
+        )
+        web_chunks = await self._web_search.search(normalized_query)
+        if not web_chunks:
+            return relevant_local[: settings.RAG_TOP_K]
+
+        ranked_combined, combined_scores = self._rank_by_evidence(
+            text, web_chunks + local_chunks
+        )
+        return [
+            chunk
+            for chunk, score in zip(ranked_combined, combined_scores, strict=True)
+            if score >= settings.RAG_EVIDENCE_RELEVANCE_FLOOR
+        ][: settings.RAG_TOP_K]
 
     @property
     def document_count(self) -> int:

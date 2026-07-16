@@ -2,11 +2,13 @@
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from src.config import settings
 from src.dependencies import get_llm, get_rag
 from src.prompts import RAG_USER_TEMPLATE, SYSTEM_PROMPT
 from src.schemas import ChatRequest, RAGReindexResponse
@@ -23,16 +25,33 @@ def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _clean_answer(text: str) -> str:
+    """Keep model output concise without relying on topic-specific rules."""
+    cleaned = re.sub(r"[ \t]+", " ", text).strip()
+    if len(cleaned) <= settings.LLM_MAX_RESPONSE_CHARS:
+        return cleaned
+
+    limit = settings.LLM_MAX_RESPONSE_CHARS
+    sentence_end = max(
+        cleaned.rfind(marker, 0, limit) for marker in (".", "!", "?")
+    )
+    if sentence_end >= limit // 2:
+        return cleaned[: sentence_end + 1].rstrip()
+    return cleaned[:limit].rsplit(" ", 1)[0].rstrip() + "…"
+
+
 async def _stream_chat(
     request: ChatRequest,
     llm: LLMService,
     rag: RAGService,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events for a chat request."""
-    chunks = rag.query(request.message)
+    chunks = await rag.query_with_fallback(request.message)
+    context_chunks = chunks[: settings.RAG_CONTEXT_MAX_CHUNKS]
     context = "\n\n".join(
-        f"[{i + 1}] (Nguồn: {chunk.source})\n{chunk.content}"
-        for i, chunk in enumerate(chunks)
+        f"[{i + 1}] (Nguồn: {chunk.source})\n"
+        f"{' '.join(chunk.content.split())[:settings.RAG_CONTEXT_CHARS_PER_CHUNK]}"
+        for i, chunk in enumerate(context_chunks)
     )
     user_message = RAG_USER_TEMPLATE.format(
         context=context if context else "Không có tài liệu tham khảo.",
@@ -49,15 +68,20 @@ async def _stream_chat(
                         "title": chunk.source,
                         "content": chunk.content[:200],
                         "score": chunk.score,
+                        "url": chunk.url,
                     }
-                    for i, chunk in enumerate(chunks)
+                    for i, chunk in enumerate(context_chunks)
                 ],
             },
         }
     )
 
+    answer_parts = []
     async for token in llm.generate_stream(user_message, SYSTEM_PROMPT):
-        yield _sse_event({"type": "token", "content": token})
+        answer_parts.append(token)
+    answer = _clean_answer("".join(answer_parts))
+    if answer:
+        yield _sse_event({"type": "token", "content": answer})
 
     yield _sse_event({"type": "done", "content": ""})
 

@@ -15,6 +15,7 @@ class RetrievedChunk(BaseModel):
     content: str
     source: str
     score: float
+    url: str | None = None
 
 
 class ASRResponse(BaseModel):

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     LLAMA_SERVER_PORT: int = 8080
     LLAMA_CTX_SIZE: int = 4096
     LLAMA_GPU_LAYERS: int = 99
+    LLAMA_CHAT_TEMPLATE_FILE: str = "templates/qwen3_no_think.jinja"
+    LLAMA_REASONING: str = "off"
+    LLAMA_REASONING_BUDGET: int = 0
+    LLM_TEMPERATURE: float = 0.2
+    LLM_MAX_TOKENS: int = 220
+    LLM_MAX_RESPONSE_CHARS: int = 800
 
     # Embedding
     EMBEDDING_MODEL_NAME: str = "Dqdung205/medical_vietnamese_embedding"
@@ -35,6 +41,22 @@ class Settings(BaseSettings):
     BM25_TOP_K: int = 5
     RAG_TOP_K: int = 5
     RRF_K: int = 60
+    RAG_MIN_EVIDENCE_CHUNKS: int = 2
+    RAG_MIN_EVIDENCE_SCORE: float = 0.62
+    RAG_EVIDENCE_RELEVANCE_FLOOR: float = 0.50
+    RAG_TRUSTED_SOURCE_HINTS: str = "dailymed,medlineplus"
+    RAG_CONTEXT_MAX_CHUNKS: int = 2
+    RAG_CONTEXT_CHARS_PER_CHUNK: int = 900
+
+    # Trusted web fallback. It runs only when local evidence is insufficient and
+    # a non-empty TAVILY_API_KEY is present in backend/.env.
+    TAVILY_ENABLED: bool = True
+    TAVILY_API_KEY: str = ""
+    TAVILY_MAX_RESULTS: int = 3
+    TAVILY_TIMEOUT_SECONDS: float = 12.0
+    TAVILY_TRUSTED_DOMAINS: str = (
+        "dailymed.nlm.nih.gov,medlineplus.gov,fda.gov,who.int,nhs.uk,moh.gov.vn"
+    )
 
     # ASR: Wav2Vec2 CTC -> KenLM + drug hotwords -> ViT5 rewrite
     ASR_MODEL_PATH: str = "../models/asr/best_model_hf"
