@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     RAG_MIN_EVIDENCE_SCORE: float = 0.62
     RAG_EVIDENCE_RELEVANCE_FLOOR: float = 0.50
     RAG_TRUSTED_SOURCE_HINTS: str = "dailymed,medlineplus"
+    # Synthetic Question/Answer training samples can be useful for experiments,
+    # but are not authoritative clinical references. Keep them off by default.
+    RAG_ALLOW_QUESTION_ANSWER_SOURCES: bool = False
+    # Optional: spend one Tavily request to favor Vietnamese clinical sources
+    # even when the local index has a technically sufficient result.
+    RAG_PREFER_VIETNAMESE_WEB: bool = False
     RAG_CONTEXT_MAX_CHUNKS: int = 2
     RAG_CONTEXT_CHARS_PER_CHUNK: int = 900
 
@@ -55,7 +61,12 @@ class Settings(BaseSettings):
     TAVILY_MAX_RESULTS: int = 3
     TAVILY_TIMEOUT_SECONDS: float = 12.0
     TAVILY_TRUSTED_DOMAINS: str = (
-        "dailymed.nlm.nih.gov,medlineplus.gov,fda.gov,who.int,nhs.uk,moh.gov.vn"
+        "moh.gov.vn,benhvien108.vn,vinmec.com,medlatec.vn,tamanhhospital.vn,"
+        "suckhoedoisong.vn,dailymed.nlm.nih.gov,medlineplus.gov,fda.gov,who.int,nhs.uk"
+    )
+    TAVILY_PREFERRED_DOMAINS: str = (
+        "moh.gov.vn,benhvien108.vn,vinmec.com,medlatec.vn,tamanhhospital.vn,"
+        "suckhoedoisong.vn"
     )
 
     # ASR: Wav2Vec2 CTC -> KenLM + drug hotwords -> ViT5 rewrite

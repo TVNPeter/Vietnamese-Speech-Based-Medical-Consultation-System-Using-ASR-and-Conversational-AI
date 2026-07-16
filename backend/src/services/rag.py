@@ -35,6 +35,16 @@ _MOJIBAKE_MARKERS = (
     "\u00e2\u0080",
 )
 
+# Controlled vocabulary for retrieval intent, not for any individual medicine.
+# The expansion stays deliberately narrow so the medicine named by the user
+# remains the dominant retrieval signal.
+_INTENT_EXPANSIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("tac dung phu", "tac dung khong mong muon", "side effect", "adverse effect"),
+        "chảy máu xuất huyết",
+    ),
+)
+
 def _mojibake_score(value: str) -> int:
     return sum(value.count(marker) for marker in _MOJIBAKE_MARKERS)
 
@@ -269,7 +279,13 @@ class RAGService:
             return replacement
 
         corrected = re.sub(r"[\w\u00c0-\u1ef9]+", replace, text, flags=re.UNICODE)
-        return corrected, corrected_terms
+        folded_query = _fold_token(corrected)
+        expansions = [
+            expansion
+            for triggers, expansion in _INTENT_EXPANSIONS
+            if any(trigger in folded_query for trigger in triggers)
+        ]
+        return " ".join([corrected, *expansions]), corrected_terms
 
     @staticmethod
     def _contains_medical_term(content: str, terms: set[str]) -> bool:
@@ -277,6 +293,25 @@ class RAGService:
         searchable_content = question if separator and question.startswith("Question:") else content
         folded_content = _fold_token(searchable_content)
         return any(term in folded_content for term in terms)
+
+    @staticmethod
+    def _is_question_answer_sample(content: str) -> bool:
+        """Identify conversational training records, not source documents."""
+        normalized = content.lstrip().casefold()
+        return normalized.startswith(("question:", "câu hỏi:")) and "answer:" in normalized
+
+    def _has_conflicting_qa_entities(
+        self, content: str, requested_terms: set[str]
+    ) -> bool:
+        """Reject a QA sample that introduces entities absent from the user query."""
+        question, separator, _ = content.partition("Answer:")
+        if not separator or not question.startswith("Question:"):
+            return False
+        folded_question = _fold_token(question)
+        mentioned_terms = {
+            term for term in self._medical_terms if term in folded_question
+        }
+        return bool(mentioned_terms - requested_terms)
 
     @staticmethod
     def _source_reliability_bonus(source: str) -> float:
@@ -489,7 +524,7 @@ class RAGService:
         query_embedding = self._embedding_model.get_query_embedding(retrieval_query)  # type: ignore[union-attr]
         result = self._chroma_collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(settings.SEMANTIC_TOP_K * 3, len(self._chunks)),
+            n_results=min(settings.SEMANTIC_TOP_K * 10, len(self._chunks)),
             include=["documents", "metadatas"],
         )
         fused: dict[str, dict[str, str | float]] = {}
@@ -502,7 +537,16 @@ class RAGService:
                 strict=True,
             )
         ):
+            if (
+                not settings.RAG_ALLOW_QUESTION_ANSWER_SOURCES
+                and self._is_question_answer_sample(str(document))
+            ):
+                continue
             if medical_terms and not self._contains_medical_term(
+                str(document), medical_terms
+            ):
+                continue
+            if medical_terms and self._has_conflicting_qa_entities(
                 str(document), medical_terms
             ):
                 continue
@@ -518,14 +562,23 @@ class RAGService:
         if self._bm25 is not None:
             lexical_scores = self._bm25.get_scores(self._tokenize(retrieval_query))
             lexical_indices = np.argsort(lexical_scores)[::-1][
-                : settings.BM25_TOP_K * 3
+                : settings.BM25_TOP_K * 10
             ]
             lexical_rank = 0
             for index in lexical_indices:
                 if lexical_scores[index] <= 0:
                     continue
                 chunk = self._chunks[int(index)]
+                if (
+                    not settings.RAG_ALLOW_QUESTION_ANSWER_SOURCES
+                    and self._is_question_answer_sample(chunk["content"])
+                ):
+                    continue
                 if medical_terms and not self._contains_medical_term(
+                    chunk["content"], medical_terms
+                ):
+                    continue
+                if medical_terms and self._has_conflicting_qa_entities(
                     chunk["content"], medical_terms
                 ):
                     continue
@@ -594,6 +647,8 @@ class RAGService:
                 score=fused_scores[index],
             )
             for index in ranked_indices
+            if settings.RAG_ALLOW_QUESTION_ANSWER_SOURCES
+            or not self._is_question_answer_sample(self._chunks[index]["content"])
         ]
 
     @staticmethod
@@ -668,17 +723,33 @@ class RAGService:
             and sum(relevant_scores) / len(relevant_scores)
             >= settings.RAG_MIN_EVIDENCE_SCORE
         )
-        if local_is_sufficient or not self._web_search.is_enabled:
+        should_try_web = self._web_search.is_enabled and (
+            not local_is_sufficient or settings.RAG_PREFER_VIETNAMESE_WEB
+        )
+        if not should_try_web:
             return relevant_local[: settings.RAG_TOP_K]
 
-        normalized_query, _ = self._prepare_prebuilt_query(text)
-        logger.info(
-            "Local RAG evidence is insufficient (%d relevant chunks); using Tavily fallback.",
-            len(relevant_scores),
-        )
-        web_chunks = await self._web_search.search(normalized_query)
+        if local_is_sufficient:
+            logger.info("Using preferred Vietnamese Tavily sources alongside local RAG.")
+        else:
+            logger.info(
+                "Local RAG evidence is insufficient (%d relevant chunks); using Tavily fallback.",
+                len(relevant_scores),
+            )
+        # Keep the user's wording for web search. Local retrieval uses intent
+        # expansion, but adding those terms here can displace the best page.
+        web_chunks = await self._web_search.search(text)
         if not web_chunks:
             return relevant_local[: settings.RAG_TOP_K]
+
+        ranked_web, web_scores = self._rank_by_evidence(text, web_chunks)
+        relevant_web = [
+            chunk
+            for chunk, score in zip(ranked_web, web_scores, strict=True)
+            if score >= settings.RAG_EVIDENCE_RELEVANCE_FLOOR
+        ]
+        if settings.RAG_PREFER_VIETNAMESE_WEB and relevant_web:
+            return relevant_web[: settings.RAG_TOP_K]
 
         ranked_combined, combined_scores = self._rank_by_evidence(
             text, web_chunks + local_chunks
