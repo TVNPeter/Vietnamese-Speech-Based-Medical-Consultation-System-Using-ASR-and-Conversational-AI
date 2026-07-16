@@ -20,6 +20,22 @@ the locally built wheel installed in `backend/.venv`, then set
 `ASR_REQUIRE_KENLM=true` to make the service fail fast instead of falling back
 to CTC plus drug hotwords. The base `uv sync` remains usable without it.
 
+The service uses CUDA when `onnxruntime-gpu` and its CUDA/cuDNN DLLs are
+available. For the local Tesla P40 (Pascal), leave Wav2Vec2 on CPU and use CUDA
+for the ViT5 rewrite because cuDNN 9 with CUDA 12 cannot execute this
+Wav2Vec2 convolution on Pascal:
+
+```env
+ASR_USE_GPU=true
+ASR_WAV2VEC2_USE_GPU=false
+ASR_CUDA_DLL_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin
+ASR_CUDNN_DLL_PATH=C:\Program Files\NVIDIA\CUDNN\v9.24\bin\12.9\x64
+```
+
+The supplied base Wav2Vec2 ONNX model validates the pipeline only. Replace it
+with the custom fine-tuned Wav2Vec2 checkpoint (with its matching vocabulary)
+to obtain useful medical transcripts.
+
 After adding or changing documents, rebuild both local indexes:
 
 ```bash

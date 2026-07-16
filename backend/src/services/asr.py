@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -28,6 +29,7 @@ class ASRService:
         self._tokenizer: object | None = None
         self._hotwords: list[str] = []
         self._kenlm_enabled = False
+        self._dll_directory_handles: list[object] = []
 
     def _require_files(self) -> None:
         required_paths = (
@@ -56,17 +58,38 @@ class ASRService:
                 "ASR runtime dependencies are missing. Run `uv sync` in backend/."
             ) from error
 
-        logger.info("Loading Wav2Vec2 ONNX and ViT5 ONNX models for ASR.")
+        providers = ["CPUExecutionProvider"]
+        if settings.ASR_USE_GPU and "CUDAExecutionProvider" in ort.get_available_providers():
+            dll_directories = []
+            for directory in (
+                settings.ASR_CUDA_DLL_PATH,
+                settings.ASR_CUDNN_DLL_PATH,
+            ):
+                if directory and Path(directory).is_dir() and hasattr(os, "add_dll_directory"):
+                    self._dll_directory_handles.append(os.add_dll_directory(directory))
+                    dll_directories.append(directory)
+            if dll_directories:
+                os.environ["PATH"] = os.pathsep.join(
+                    [*dll_directories, os.environ.get("PATH", "")]
+                )
+            providers.insert(0, "CUDAExecutionProvider")
+        logger.info(
+            "Loading Wav2Vec2 ONNX and ViT5 ONNX models for ASR with %s.",
+            providers[0],
+        )
+        wav2vec2_providers = providers if settings.ASR_WAV2VEC2_USE_GPU else [
+            "CPUExecutionProvider"
+        ]
         self._asr_session = ort.InferenceSession(
-            str(self._model_path / "model.onnx"), providers=["CPUExecutionProvider"]
+            str(self._model_path / "model.onnx"), providers=wav2vec2_providers
         )
         self._vit5_encoder = ort.InferenceSession(
             str(self._vit5_path / "encoder_model.onnx"),
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
         self._vit5_decoder = ort.InferenceSession(
             str(self._vit5_path / "decoder_model.onnx"),
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
         self._tokenizer = Tokenizer.from_file(str(self._vit5_path / "tokenizer.json"))
         self._hotwords = self._read_hotwords(self._hotwords_path)

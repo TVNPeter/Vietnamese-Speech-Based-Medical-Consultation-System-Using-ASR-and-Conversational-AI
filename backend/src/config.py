@@ -36,10 +36,14 @@ class Settings(BaseSettings):
     ASR_VIT5_MODEL_PATH: str = "models/vit5/onnx"
     ASR_HOTWORDS_PATH: str = "../text/drugs.txt"
     ASR_CORPUS_PATH: str = "../text/corpus.txt"
-    ASR_BEAM_WIDTH: int = 100
+    ASR_BEAM_WIDTH: int = 5
     ASR_HOTWORD_WEIGHT: float = 12.0
     ASR_MAX_REWRITE_TOKENS: int = 192
     ASR_REQUIRE_KENLM: bool = False
+    ASR_USE_GPU: bool = True
+    ASR_WAV2VEC2_USE_GPU: bool = True
+    ASR_CUDA_DLL_PATH: str = ""
+    ASR_CUDNN_DLL_PATH: str = ""
 
     # TTS
     TTS_MODEL_PATH: str = "models/tts"
