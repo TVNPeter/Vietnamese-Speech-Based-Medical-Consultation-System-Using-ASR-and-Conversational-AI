@@ -182,6 +182,10 @@ cython_debug/
 
 # Models
 /backend/models/*/*
+/wav2vec2.7z
+/kenlm.7z
+/vit5.7z
+/text-*.zip
 
 # llama-server
 /backend/llama-b9850-bin-win-vulkan-x64

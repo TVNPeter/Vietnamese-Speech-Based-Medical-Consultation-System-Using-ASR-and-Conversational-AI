@@ -30,11 +30,22 @@ class Settings(BaseSettings):
     RAG_TOP_K: int = 5
     RRF_K: int = 60
 
-    # ASR / TTS
-    ASR_MODEL_PATH: str = "models/asr"
+    # ASR: Wav2Vec2 CTC -> KenLM + drug hotwords -> ViT5 rewrite
+    ASR_MODEL_PATH: str = "models/asr/onnx"
+    ASR_KENLM_PATH: str = "models/kenlm/kenlm_vi_medical_4gram.bin"
+    ASR_VIT5_MODEL_PATH: str = "models/vit5/onnx"
+    ASR_HOTWORDS_PATH: str = "../text/drugs.txt"
+    ASR_CORPUS_PATH: str = "../text/corpus.txt"
+    ASR_BEAM_WIDTH: int = 100
+    ASR_HOTWORD_WEIGHT: float = 12.0
+    ASR_MAX_REWRITE_TOKENS: int = 192
+    ASR_REQUIRE_KENLM: bool = False
+
+    # TTS
     TTS_MODEL_PATH: str = "models/tts"
     TTS_ENABLED: bool = True
-    TTS_VOICE: str = "Trúc Ly"
+    TTS_VOICE: str = "\u0054\u0072\u00fa\u0063\u0020\u004c\u0079"
+    TTS_OUTPUT_FILENAME: str = "vieneu-tts-l-cystine-utf8.wav"
 
     # HuggingFace
     HF_TOKEN: str = ""
