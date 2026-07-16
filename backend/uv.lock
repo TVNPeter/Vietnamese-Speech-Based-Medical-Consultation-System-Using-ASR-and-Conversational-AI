@@ -284,6 +284,7 @@ dependencies = [
     { name = "rank-bm25" },
     { name = "tokenizers" },
     { name = "torch" },
+    { name = "torchaudio" },
     { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "vieneu" },
@@ -316,6 +317,7 @@ requires-dist = [
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "tokenizers", specifier = ">=0.20.0" },
     { name = "torch", specifier = "==2.5.1+cu118", index = "https://download.pytorch.org/whl/cu118" },
+    { name = "torchaudio", specifier = "==2.5.1+cu118", index = "https://download.pytorch.org/whl/cu118" },
     { name = "transformers", specifier = "==4.56.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
     { name = "vieneu", specifier = ">=3.2.3" },
@@ -3599,6 +3601,18 @@ wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.5.1%2Bcu118-cp312-cp312-linux_x86_64.whl", hash = "sha256:f4c3ae93c72e8b725b510c3bc5b9dd5437f6740a66c3cc3bb1a19f177c3baef4", upload-time = "2024-10-29T23:08:59Z" },
     { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.5.1%2Bcu118-cp312-cp312-win_amd64.whl", hash = "sha256:3edf97d9b0a17e3f764a511ed084e866c086af76c9d489cc51d5edb77ca7c936", upload-time = "2024-10-29T23:09:35Z" },
     { url = "https://download-r2.pytorch.org/whl/cu118/torch-2.5.1%2Bcu118-cp313-cp313-linux_x86_64.whl", hash = "sha256:60c1d1b522ea534a17e1ac60a0dc542ed578c45c84d63dc1528febbd1a0f5953", upload-time = "2024-10-29T23:11:35Z" },
+]
+
+[[package]]
+name = "torchaudio"
+version = "2.5.1+cu118"
+source = { registry = "https://download.pytorch.org/whl/cu118" }
+dependencies = [
+    { name = "torch" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.5.1%2Bcu118-cp312-cp312-linux_x86_64.whl", hash = "sha256:90673c6cfde4dc3a75c8e26ef74f9294aada4ee836a6120dae80db0b06d22d65", upload-time = "2024-10-29T23:14:26Z" },
+    { url = "https://download-r2.pytorch.org/whl/cu118/torchaudio-2.5.1%2Bcu118-cp312-cp312-win_amd64.whl", hash = "sha256:d9429c87fc5886ec6555171f35fc1b2e1a59a6ca13a26a99a2b6a837a4e0be70", upload-time = "2024-10-29T23:14:27Z" },
 ]
 
 [[package]]
