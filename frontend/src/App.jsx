@@ -3,10 +3,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Bot,
+  ChevronRight,
   CircleStop,
+  HeartPulse,
   Mic,
   SendHorizontal,
-  Stethoscope,
+  ShieldAlert,
+  Sparkles,
   Trash2,
   UserRound,
   Volume2,
@@ -24,6 +27,12 @@ const WELCOME_MESSAGE = {
     'Chào bạn, mình là trợ lý y tế AI. Bạn có thể hỏi về triệu chứng, thuốc hoặc tương tác thuốc. Thông tin chỉ mang tính tham khảo và không thay thế khám bệnh.',
   sources: [],
 };
+
+const SUGGESTED_QUESTIONS = [
+  'Tác dụng phụ của warfarin là gì?',
+  'Panadol có thể dùng khi nào?',
+  'Dấu hiệu nào cần đi khám ngay?',
+];
 
 function loadMessages() {
   try {
@@ -66,6 +75,28 @@ function Sources({ sources }) {
         ))}
       </ol>
     </details>
+  );
+}
+
+function QuickPrompts({ onSelect }) {
+  return (
+    <section className="quick-prompts" aria-label="Câu hỏi gợi ý">
+      <div className="quick-prompts-heading">
+        <span><Sparkles size={16} /></span>
+        <div>
+          <p>Bắt đầu cuộc trò chuyện</p>
+          <h2>Hỏi nhanh về thuốc hoặc triệu chứng</h2>
+        </div>
+      </div>
+      <div className="quick-prompts-list">
+        {SUGGESTED_QUESTIONS.map((question) => (
+          <button key={question} onClick={() => onSelect(question)}>
+            <span>{question}</span>
+            <ChevronRight size={17} />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -316,19 +347,25 @@ function App() {
     }
   };
 
+  const selectSuggestedQuestion = (question) => {
+    setInput(question);
+    requestAnimationFrame(resizeTextarea);
+    textareaRef.current?.focus();
+  };
+
   return (
     <main className="app-shell">
       <section className="chat-card" aria-label="Trợ lý y tế AI">
         <header className="app-header">
           <div className="brand">
-            <span className="brand-icon"><Stethoscope size={22} /></span>
+            <span className="brand-icon"><HeartPulse size={23} /></span>
             <div>
               <p>Hệ thống tư vấn y tế</p>
               <h1>Trợ lý Y tế AI</h1>
             </div>
           </div>
           <div className="header-actions">
-            <span className="status"><i /> RAG cục bộ</span>
+            <span className="status"><i /> Sẵn sàng tư vấn</span>
             <button className="icon-button" onClick={handleClearChat} title="Xóa lịch sử chat" aria-label="Xóa lịch sử chat">
               <Trash2 size={18} />
             </button>
@@ -336,10 +373,11 @@ function App() {
         </header>
 
         <div className="medical-note">
-          Không dùng cho tình huống cấp cứu. Nếu có dấu hiệu nguy hiểm, hãy gọi cấp cứu hoặc đến cơ sở y tế gần nhất.
+          <ShieldAlert size={17} aria-hidden="true" />
+          <span>Không dùng cho tình huống cấp cứu. Nếu có dấu hiệu nguy hiểm, hãy gọi cấp cứu hoặc đến cơ sở y tế gần nhất.</span>
         </div>
 
-        <section className="conversation" aria-live="polite">
+        <section className={`conversation ${messages.length === 1 ? 'is-empty' : ''}`} aria-live="polite">
           {messages.map((message) => (
             <article key={message.id} className={`message ${message.role}`}>
               <div className="avatar" aria-hidden="true">
@@ -369,6 +407,9 @@ function App() {
               </div>
             </article>
           ))}
+          {messages.length === 1 && !isLoading && (
+            <QuickPrompts onSelect={selectSuggestedQuestion} />
+          )}
           {isLoading && <div className="typing"><span /><span /><span /> Đang tìm tài liệu và soạn câu trả lời…</div>}
           <div ref={messagesEndRef} />
         </section>
