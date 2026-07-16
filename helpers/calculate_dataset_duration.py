@@ -4,7 +4,7 @@ import wave
 import argparse
 import sys
 
-# Reconfigure stdout to utf-8 if supported to prevent encoding crashes on Windows terminal
+# Reconfigure stdout to UTF-8 if supported to prevent encoding crashes on Windows terminals.
 if hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -13,8 +13,8 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 def get_wav_duration(file_path):
     """
-    Get duration of a WAV file using the built-in wave module.
-    Returns duration in seconds.
+    Get the duration of a WAV file using the built-in wave module.
+    Returns the duration in seconds.
     """
     try:
         with wave.open(file_path, 'rb') as wav_file:
@@ -31,31 +31,31 @@ def format_time(seconds):
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
     if hours > 0:
-        return f"{hours} giờ {minutes} phút {secs:.2f} giây ({seconds:.2f} giây)"
+        return f"{hours} hours {minutes} minutes {secs:.2f} seconds ({seconds:.2f} seconds)"
     elif minutes > 0:
-        return f"{minutes} phút {secs:.2f} giây ({seconds:.2f} giây)"
+        return f"{minutes} minutes {secs:.2f} seconds ({seconds:.2f} seconds)"
     else:
-        return f"{secs:.2f} giây"
+        return f"{secs:.2f} seconds"
 
 def main():
-    parser = argparse.ArgumentParser(description="Tính toán tổng thời lượng của dataset âm thanh WAV.")
+    parser = argparse.ArgumentParser(description="Calculate the total duration of a WAV audio dataset.")
     parser.add_argument(
         "--csv_path", 
         type=str, 
         default="notebooks/finetune-wav2vec2/train_set/train.csv",
-        help="Đường dẫn tới file CSV chứa danh sách audio (mặc định: notebooks/finetune-wav2vec2/train_set/train.csv)"
+        help="Path to the CSV file containing the audio list (default: notebooks/finetune-wav2vec2/train_set/train.csv)"
     )
     parser.add_argument(
         "--audio_dir", 
         type=str, 
         default="notebooks/finetune-wav2vec2/train_set/wavs",
-        help="Thư mục chứa các file .wav thực tế (mặc định: notebooks/finetune-wav2vec2/train_set/wavs)"
+        help="Directory containing the actual .wav files (default: notebooks/finetune-wav2vec2/train_set/wavs)"
     )
     parser.add_argument(
         "--path_col", 
         type=str, 
         default="path",
-        help="Tên cột chứa đường dẫn file trong file CSV (mặc định: 'path')"
+        help="Name of the CSV column containing file paths (default: 'path')"
     )
     
     args = parser.parse_args()
@@ -65,12 +65,12 @@ def main():
     path_col = args.path_col
     
     if not os.path.exists(csv_path):
-        print(f"[LOI] Khong tim thay file CSV tai: {csv_path}")
-        print("Vui long chi dinh duong dan dung bang tham so --csv_path")
+        print(f"[ERROR] CSV file not found at: {csv_path}")
+        print("Please specify the correct path using the --csv_path argument")
         sys.exit(1)
         
-    print(f"[*] Dang doc danh sach tu: {csv_path}")
-    print(f"[*] Thu muc tim kiem am thanh: {audio_dir}")
+    print(f"[*] Reading list from: {csv_path}")
+    print(f"[*] Audio search directory: {audio_dir}")
     
     total_duration = 0.0
     processed_count = 0
@@ -83,19 +83,19 @@ def main():
             reader = csv.DictReader(f)
             
             if path_col not in reader.fieldnames:
-                print(f"[LOI] Cot '{path_col}' khong ton tai trong file CSV.")
-                print(f"Cac cot hien co: {', '.join(reader.fieldnames)}")
+                print(f"[ERROR] Column '{path_col}' does not exist in the CSV file.")
+                print(f"Available columns: {', '.join(reader.fieldnames)}")
                 sys.exit(1)
                 
             rows = list(reader)
             total_rows = len(rows)
-            print(f"[+] Tim thay {total_rows} dong du lieu trong CSV. Bat dau quet...")
+            print(f"[+] Found {total_rows} data rows in the CSV. Starting scan...")
             
             for idx, row in enumerate(rows, 1):
                 rel_path = row[path_col]
                 filename = os.path.basename(rel_path)
                 
-                # Check different candidate paths
+                # Check several candidate paths.
                 candidate_paths = [
                     os.path.join(audio_dir, filename),
                     os.path.join(os.path.dirname(csv_path), rel_path),
@@ -121,36 +121,36 @@ def main():
                     error_count += 1
                     
                 if idx % 500 == 0 or idx == total_rows:
-                    print(f"   Tien do: {idx}/{total_rows} ({idx/total_rows*100:.1f}%) | Da tim thay: {processed_count} | Thieu: {missing_count}")
+                    print(f"   Progress: {idx}/{total_rows} ({idx/total_rows*100:.1f}%) | Found: {processed_count} | Missing: {missing_count}")
     except Exception as e:
-        print(f"[LOI] Khong the doc file CSV: {e}")
+        print(f"[ERROR] Could not read the CSV file: {e}")
         sys.exit(1)
 
     print("\n" + "="*60)
-    print("KET QUA THONG KE CHI TIET:")
+    print("DETAILED STATISTICS:")
     print("="*60)
-    print(f" Tong so dong trong CSV:      {total_rows}")
-    print(f" So file xu ly thanh cong:    {processed_count}")
-    print(f" So file khong tim thay:      {missing_count}")
-    print(f" So file loi dinh dang:       {error_count}")
+    print(f" Total rows in CSV:           {total_rows}")
+    print(f" Successfully processed:      {processed_count}")
+    print(f" Files not found:             {missing_count}")
+    print(f" Files with format errors:    {error_count}")
     
     if processed_count > 0:
         avg_dur = sum(durations) / processed_count
         min_dur = min(durations)
         max_dur = max(durations)
-        print(f" Tong thoi luong tinh duoc:   {format_time(total_duration)}")
-        print(f" Thoi luong trung binh:       {avg_dur:.2f} giay / file")
-        print(f" Thoi luong ngan nhat:        {min_dur:.2f} giay")
-        print(f" Thoi luong dai nhat:         {max_dur:.2f} giay")
+        print(f" Total calculated duration:   {format_time(total_duration)}")
+        print(f" Average duration:            {avg_dur:.2f} seconds / file")
+        print(f" Shortest duration:           {min_dur:.2f} seconds")
+        print(f" Longest duration:            {max_dur:.2f} seconds")
         
         if missing_count > 0:
             estimated_missing_duration = missing_count * avg_dur
             estimated_total_duration = total_duration + estimated_missing_duration
-            print(f"\n[CANH BAO] Co {missing_count} file am thanh bi thieu tren may cuc bo nay.")
-            print(f" * Uoc tinh thoi luong cua phan bi thieu: {format_time(estimated_missing_duration)}")
-            print(f" * Du kien TONG thoi luong FULL DATASET:  {format_time(estimated_total_duration)}")
+            print(f"\n[WARNING] There are {missing_count} missing audio files on this local machine.")
+            print(f" * Estimated duration of missing portion: {format_time(estimated_missing_duration)}")
+            print(f" * Estimated TOTAL duration of FULL DATASET: {format_time(estimated_total_duration)}")
     else:
-        print("[LOI] Khong tim thay hoac khong doc duoc file WAV nao de tinh thoi luong.")
+        print("[ERROR] No WAV files were found or readable for duration calculation.")
     print("="*60)
 
 if __name__ == "__main__":
