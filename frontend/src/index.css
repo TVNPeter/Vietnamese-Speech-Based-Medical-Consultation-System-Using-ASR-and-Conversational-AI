@@ -125,6 +125,7 @@ button { cursor: pointer; }
 
 .icon-button,
 .mic-button,
+.upload-button,
 .send-button,
 .stop-button { display: grid; place-items: center; border: 0; transition: .18s ease; }
 .icon-button {
@@ -278,8 +279,13 @@ button { cursor: pointer; }
 .composer textarea { flex: 1; min-height: 30px; max-height: 140px; padding: 5px 3px; color: #23413d; border: 0; outline: 0; resize: none; line-height: 1.45; }
 .composer textarea::placeholder { color: #8a9e99; }
 .mic-button,
+.upload-button,
 .send-button,
 .stop-button { flex: 0 0 41px; width: 41px; height: 41px; border-radius: 13px; }
+.audio-file-input { display: none; }
+.upload-button { color: #43736d; background: #f4f8f7; }
+.upload-button:hover { color: #126b5e; background: #dcefe9; transform: translateY(-1px); }
+.upload-button:disabled { opacity: .45; cursor: not-allowed; }
 .mic-button { color: #41766e; background: #edf6f3; }
 .mic-button:hover { color: #126b5e; background: #d9f0e8; transform: translateY(-1px); }
 .mic-button.recording { color: white; background: #ca4b4b; animation: recording 1.2s infinite; }

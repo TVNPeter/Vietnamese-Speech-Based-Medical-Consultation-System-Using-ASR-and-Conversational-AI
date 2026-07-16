@@ -7,6 +7,7 @@ import {
   CircleStop,
   HeartPulse,
   Mic,
+  Paperclip,
   SendHorizontal,
   ShieldAlert,
   Sparkles,
@@ -105,6 +106,7 @@ function App() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [playingId, setPlayingId] = useState(null);
   const [notice, setNotice] = useState('');
   const messagesEndRef = useRef(null);
@@ -113,6 +115,7 @@ function App() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioRef = useRef(null);
+  const audioFileInputRef = useRef(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -301,6 +304,33 @@ function App() {
     setIsRecording(false);
   };
 
+  const transcribeAudio = async (audio, filename) => {
+    if (!audio || isLoading || isTranscribing) return;
+
+    const formData = new FormData();
+    formData.append('file', audio, filename || 'recording.wav');
+    setIsTranscribing(true);
+    setNotice(`Đang nhận dạng ${filename || 'file âm thanh'}…`);
+    try {
+      const response = await fetch(`${API_BASE}/asr`, { method: 'POST', body: formData });
+      if (!response.ok) throw new Error(`Máy chủ trả về mã ${response.status}.`);
+      const result = await response.json();
+      setInput((previous) => `${previous} ${result.text || ''}`.trim());
+      setNotice('');
+      requestAnimationFrame(resizeTextarea);
+    } catch (error) {
+      setNotice(`Không thể nhận dạng giọng nói: ${error.message}`);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleAudioFile = (event) => {
+    const [audio] = event.target.files || [];
+    event.target.value = '';
+    if (audio) transcribeAudio(audio, audio.name);
+  };
+
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setNotice('Trình duyệt này không hỗ trợ ghi âm.');
@@ -318,19 +348,7 @@ function App() {
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
         const audio = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const formData = new FormData();
-        formData.append('file', audio, 'recording.webm');
-        try {
-          setNotice('Đang nhận dạng giọng nói…');
-          const response = await fetch(`${API_BASE}/asr`, { method: 'POST', body: formData });
-          if (!response.ok) throw new Error(`Máy chủ trả về mã ${response.status}.`);
-          const result = await response.json();
-          setInput((previous) => `${previous} ${result.text || ''}`.trim());
-          setNotice('');
-          requestAnimationFrame(resizeTextarea);
-        } catch (error) {
-          setNotice(`Không thể nhận dạng giọng nói: ${error.message}`);
-        }
+        await transcribeAudio(audio, 'recording.webm');
       };
       recorder.start();
       setIsRecording(true);
@@ -417,10 +435,27 @@ function App() {
         <footer className="composer-area">
           {notice && <p className="notice">{notice}</p>}
           <div className="composer">
+            <input
+              ref={audioFileInputRef}
+              className="audio-file-input"
+              type="file"
+              accept="audio/wav,audio/x-wav,audio/webm,.wav,.webm"
+              onChange={handleAudioFile}
+              aria-label="Chọn file âm thanh"
+            />
+            <button
+              className="upload-button"
+              onClick={() => audioFileInputRef.current?.click()}
+              disabled={isLoading || isTranscribing}
+              title="Chọn file WAV hoặc WebM để nhận dạng"
+              aria-label="Chọn file âm thanh để nhận dạng"
+            >
+              <Paperclip size={19} />
+            </button>
             <button
               className={`mic-button ${isRecording ? 'recording' : ''}`}
               onClick={isRecording ? stopRecording : startRecording}
-              disabled={isLoading}
+              disabled={isLoading || isTranscribing}
               title={isRecording ? 'Dừng ghi âm' : 'Ghi âm câu hỏi'}
               aria-label={isRecording ? 'Dừng ghi âm' : 'Ghi âm câu hỏi'}
             >
@@ -444,12 +479,12 @@ function App() {
                 <CircleStop size={20} />
               </button>
             ) : (
-              <button className="send-button" onClick={handleSend} disabled={!input.trim()} title="Gửi câu hỏi" aria-label="Gửi câu hỏi">
+              <button className="send-button" onClick={handleSend} disabled={!input.trim() || isTranscribing} title="Gửi câu hỏi" aria-label="Gửi câu hỏi">
                 <SendHorizontal size={20} />
               </button>
             )}
           </div>
-          <p className="composer-hint">Enter để gửi · Shift + Enter xuống dòng · Câu trả lời cần được bác sĩ xác nhận khi có quyết định điều trị.</p>
+          <p className="composer-hint">Kẹp giấy để chọn WAV/WebM · Enter để gửi · Câu trả lời cần được bác sĩ xác nhận khi có quyết định điều trị.</p>
         </footer>
       </section>
     </main>
