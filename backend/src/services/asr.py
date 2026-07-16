@@ -225,6 +225,8 @@ class ASRService:
         text = self._ctc_decoder.decode(  # type: ignore[union-attr]
             logits[0],
             beam_width=settings.ASR_BEAM_WIDTH,
+            beam_prune_logp=settings.ASR_BEAM_PRUNE_LOGP,
+            token_min_logp=settings.ASR_TOKEN_MIN_LOGP,
             hotwords=self._hotwords,
             hotword_weight=settings.ASR_HOTWORD_WEIGHT,
         )

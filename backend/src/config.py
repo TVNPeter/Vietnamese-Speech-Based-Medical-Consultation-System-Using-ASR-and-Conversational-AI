@@ -36,8 +36,10 @@ class Settings(BaseSettings):
     ASR_VIT5_MODEL_PATH: str = "../models/kenlm+vit5/vit5_medical_rewrite_stage2_final"
     ASR_HOTWORDS_PATH: str = "../text/drugs.txt"
     ASR_CORPUS_PATH: str = "../text/corpus.txt"
-    ASR_BEAM_WIDTH: int = 5
-    ASR_HOTWORD_WEIGHT: float = 12.0
+    ASR_BEAM_WIDTH: int = 16
+    ASR_BEAM_PRUNE_LOGP: float = -5.0
+    ASR_TOKEN_MIN_LOGP: float = -3.0
+    ASR_HOTWORD_WEIGHT: float = 15.0
     ASR_MAX_REWRITE_TOKENS: int = 192
     ASR_REQUIRE_KENLM: bool = False
     ASR_USE_GPU: bool = True
