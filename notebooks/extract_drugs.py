@@ -42,56 +42,104 @@ def is_foreign(word, vn_regex):
         return False
     return True
 
-def main():
-    input_file = 'randomqa.txt'
-    output_file = 'drugs.txt'
-    
+import csv
+import os
+
+def extract_candidates():
     vn_regex = build_vn_regex()
     extracted_terms = set()
     
-    with open(input_file, 'r', encoding='utf-8') as fin:
-        for line in fin:
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-                
-            text = data.get('question', '') + " " + data.get('answer', '')
-            
-            # Find all words
-            words = re.findall(r'[a-zA-Z0-9\u00C0-\u1EF9]+', text)
-            
-            current_term = []
-            for w in words:
-                if is_foreign(w, vn_regex):
-                    current_term.append(w.lower())
-                else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    corpus_path = os.path.join(script_dir, '..', 'text', 'corpus.txt')
+    train_csv_path = os.path.join(script_dir, 'finetune-wav2vec2', 'train_set', 'train.csv')
+    randomqa_path = os.path.join(script_dir, 'randomqa.txt')
+    
+    # 1. Process corpus.txt
+    if os.path.exists(corpus_path):
+        print(f"Scanning {corpus_path}...")
+        with open(corpus_path, 'r', encoding='utf-8', errors='ignore') as fin:
+            for line in fin:
+                if not line.strip():
+                    continue
+                words = re.findall(r'[a-zA-Z0-9\u00C0-\u1EF9]+', line)
+                current_term = []
+                for w in words:
+                    if is_foreign(w, vn_regex):
+                        current_term.append(w.lower())
+                    else:
+                        if current_term:
+                            term_str = " ".join(current_term)
+                            if len(term_str) > 1:
+                                extracted_terms.add(term_str)
+                            current_term = []
+                if current_term:
+                    term_str = " ".join(current_term)
+                    if len(term_str) > 1:
+                        extracted_terms.add(term_str)
+                        
+    # 2. Process train.csv
+    if os.path.exists(train_csv_path):
+        print(f"Scanning {train_csv_path}...")
+        with open(train_csv_path, 'r', encoding='utf-8', errors='ignore') as fin:
+            reader = csv.reader(fin)
+            header = next(reader, None)
+            for row in reader:
+                if len(row) >= 2:
+                    text = row[1]
+                    words = re.findall(r'[a-zA-Z0-9\u00C0-\u1EF9]+', text)
+                    current_term = []
+                    for w in words:
+                        if is_foreign(w, vn_regex):
+                            current_term.append(w.lower())
+                        else:
+                            if current_term:
+                                term_str = " ".join(current_term)
+                                if len(term_str) > 1:
+                                    extracted_terms.add(term_str)
+                                current_term = []
                     if current_term:
                         term_str = " ".join(current_term)
-                        if len(term_str) > 1: # exclude single isolated letters
+                        if len(term_str) > 1:
                             extracted_terms.add(term_str)
-                        current_term = []
-            if current_term:
-                term_str = " ".join(current_term)
-                if len(term_str) > 1:
-                    extracted_terms.add(term_str)
-                    
-    # Basic filtering to remove pure numbers or common noise
+                            
+    # 3. Process randomqa.txt if exists
+    if os.path.exists(randomqa_path):
+        print(f"Scanning {randomqa_path}...")
+        with open(randomqa_path, 'r', encoding='utf-8', errors='ignore') as fin:
+            for line in fin:
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    text = data.get('question', '') + " " + data.get('answer', '')
+                    words = re.findall(r'[a-zA-Z0-9\u00C0-\u1EF9]+', text)
+                    current_term = []
+                    for w in words:
+                        if is_foreign(w, vn_regex):
+                            current_term.append(w.lower())
+                        else:
+                            if current_term:
+                                term_str = " ".join(current_term)
+                                if len(term_str) > 1:
+                                    extracted_terms.add(term_str)
+                                current_term = []
+                    if current_term:
+                        term_str = " ".join(current_term)
+                        if len(term_str) > 1:
+                            extracted_terms.add(term_str)
+                except json.JSONDecodeError:
+                    continue
+
     final_terms = []
     for term in extracted_terms:
-        # Avoid things like "1 2", "500 mg" (wait, mg is fine, but numbers alone in sequence no)
         if not re.match(r'^[0-9\s]+$', term): 
             final_terms.append(term)
             
-    sorted_terms = sorted(final_terms)
-    
-    with open(output_file, 'w', encoding='utf-8') as fout:
-        for term in sorted_terms:
-            fout.write(term + '\n')
-            
-    print(f"Extracted {len(sorted_terms)} medical/drug terms to {output_file}")
+    return sorted(final_terms)
+
+def main():
+    terms = extract_candidates()
+    print(f"Extracted {len(terms)} total raw candidate terms from corpus and train.csv")
 
 if __name__ == '__main__':
     main()
