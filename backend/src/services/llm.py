@@ -32,6 +32,9 @@ class LLMService:
             raise FileNotFoundError(f"llama-server not found: {server_path}")
         if not model_path.is_file():
             raise FileNotFoundError(f"LLM model not found: {model_path}")
+        template_path = settings.resolve(settings.LLAMA_CHAT_TEMPLATE_FILE)
+        if not template_path.is_file():
+            raise FileNotFoundError(f"LLM chat template not found: {template_path}")
 
         cmd = [
             str(server_path),
@@ -45,6 +48,12 @@ class LLMService:
             str(settings.LLAMA_CTX_SIZE),
             "--n-gpu-layers",
             str(settings.LLAMA_GPU_LAYERS),
+            "--chat-template-file",
+            str(template_path),
+            "--reasoning",
+            settings.LLAMA_REASONING,
+            "--reasoning-budget",
+            str(settings.LLAMA_REASONING_BUDGET),
         ]
         logger.info("Starting llama-server: %s", " ".join(cmd))
         self._process = subprocess.Popen(
@@ -98,7 +107,8 @@ class LLMService:
                 {"role": "user", "content": user_message},
             ],
             "stream": True,
-            "temperature": 0.7,
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS,
         }
         async with self._client.stream(
             "POST",

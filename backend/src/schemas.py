@@ -15,6 +15,7 @@ class RetrievedChunk(BaseModel):
     content: str
     source: str
     score: float
+    url: str | None = None
 
 
 class ASRResponse(BaseModel):
@@ -27,3 +28,10 @@ class TTSRequest(BaseModel):
     """Text to synthesize into speech."""
 
     text: str
+
+
+class RAGReindexResponse(BaseModel):
+    """Summary returned after rebuilding the local RAG index."""
+
+    document_count: int
+    chunk_count: int

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 
+from src.config import settings
 from src.dependencies import get_tts
 from src.schemas import TTSRequest
 from src.services.tts import TTSService
@@ -20,5 +21,9 @@ async def synthesize_speech(
     return Response(
         content=audio_bytes,
         media_type="audio/wav",
-        headers={"Content-Disposition": "inline; filename=speech.wav"},
+        headers={
+            "Content-Disposition": (
+                f"inline; filename={settings.TTS_OUTPUT_FILENAME}"
+            )
+        },
     )
