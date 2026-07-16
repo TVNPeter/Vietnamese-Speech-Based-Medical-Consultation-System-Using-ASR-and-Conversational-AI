@@ -1,59 +1,46 @@
-# Backend setup
+# Backend
 
-The RAG service indexes Markdown in `backend/documents/` twice: FAISS handles
-semantic matches and BM25 preserves exact terms such as medicine names. Their
-rankings are combined with reciprocal-rank fusion.
+Hướng dẫn cài đặt, bàn giao assets và chạy toàn bộ hệ thống nằm ở
+[README tại thư mục gốc](../README.md). Tài liệu này chỉ tóm tắt các chi tiết
+backend cần lưu ý.
 
-## Medical ASR pipeline
+## Thành phần runtime
 
-`POST /api/asr` accepts the browser's `audio/webm` recording and runs:
+- **LLM:** `llama-server` chạy `models/qwen3-4b-thinking.gguf` và được backend
+  tự khởi động khi app khởi động.
+- **RAG:** Chroma prebuilt ở `models/chromadb` kết hợp BM25 prebuilt ở
+  `models/bm25_index.pkl`; ranking dùng reciprocal-rank fusion (RRF).
+- **ASR:** custom Wav2Vec2 checkpoint ở `models/asr/best_model_hf` → KenLM +
+  hotword `text/drugs.txt` → ViT5 ở
+  `models/kenlm+vit5/vit5_medical_rewrite_stage2_final`.
+- **TTS:** VieNeu-TTS v3 Turbo; endpoint giữ UTF-8 và trả tên file mặc định
+  `vieneu-tts-l-cystine-utf8.wav`.
 
-1. Wav2Vec2 CTC (`backend/models/asr/onnx`)
-2. Beam search with `text/drugs.txt` hotword boosting and
-   `models/kenlm/kenlm_vi_medical_4gram.bin`
-3. ViT5 medical rewrite (`backend/models/vit5/onnx`)
+## Chạy backend
 
-`text/corpus.txt` is the corpus used to build the supplied KenLM binary; it is
-kept for traceability and is not loaded on each request. The Python `kenlm`
-binding enables the language-model stage. On Windows it is a native build: use
-the locally built wheel installed in `backend/.venv`, then set
-`ASR_REQUIRE_KENLM=true` to make the service fail fast instead of falling back
-to CTC plus drug hotwords. The base `uv sync` remains usable without it.
-
-The service uses CUDA when `onnxruntime-gpu` and its CUDA/cuDNN DLLs are
-available. For the local Tesla P40 (Pascal), leave Wav2Vec2 on CPU and use CUDA
-for the ViT5 rewrite because cuDNN 9 with CUDA 12 cannot execute this
-Wav2Vec2 convolution on Pascal:
-
-```env
-ASR_USE_GPU=true
-ASR_WAV2VEC2_USE_GPU=false
-ASR_CUDA_DLL_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin
-ASR_CUDNN_DLL_PATH=C:\Program Files\NVIDIA\CUDNN\v9.24\bin\12.9\x64
+```powershell
+cd backend
+Copy-Item .env.example .env
+uv sync
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn src.app:app --host 127.0.0.1 --port 8000
 ```
 
-The supplied base Wav2Vec2 ONNX model validates the pipeline only. Replace it
-with the custom fine-tuned Wav2Vec2 checkpoint (with its matching vocabulary)
-to obtain useful medical transcripts.
+Truy cập Swagger tại <http://localhost:8000/docs>.
 
-After adding or changing documents, rebuild both local indexes:
+## KenLM
 
-```bash
-curl -X POST http://localhost:8000/api/rag/reindex
+Để bắt buộc pipeline ASR sử dụng KenLM, cài Python wheel `kenlm` đã được build
+cho Windows/Python 3.12 và đặt `ASR_REQUIRE_KENLM=true` trong `.env`. Nếu chưa có
+wheel, để giá trị `false`; ASR vẫn chạy CTC + hotword nhưng chất lượng thấp hơn.
+
+## Reindex RAG
+
+Sau khi thay đổi corpus/index, gọi:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/rag/reindex
 ```
 
-Optional `.env` settings:
-
-```env
-SEMANTIC_TOP_K=5
-BM25_TOP_K=5
-RAG_TOP_K=5
-TTS_ENABLED=true
-TTS_OUTPUT_FILENAME=vieneu-tts-l-cystine-utf8.wav
-```
-
-VieNeu-TTS v3 Turbo loads on the first `POST /api/tts` request and downloads
-its own cached weights. Do not commit model weights into this repository.
-
-`POST /api/tts` preserves UTF-8 Vietnamese request text and uses
-`vieneu-tts-l-cystine-utf8.wav` as the default output filename.
+Reindex có thể tốn thời gian và yêu cầu đủ tài nguyên GPU/CPU. Để dùng index đã
+đóng gói, giữ nguyên `models/chromadb` và `models/bm25_index.pkl`.
