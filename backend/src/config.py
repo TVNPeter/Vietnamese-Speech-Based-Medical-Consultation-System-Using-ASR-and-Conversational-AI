@@ -20,6 +20,12 @@ class Settings(BaseSettings):
 
     # Embedding
     EMBEDDING_MODEL_NAME: str = "Dqdung205/medical_vietnamese_embedding"
+    EMBEDDING_DEVICE: str = "auto"
+    EMBEDDING_BATCH_SIZE: int = 48
+    RAG_BACKEND: str = "faiss"
+    CHROMA_PERSIST_DIRECTORY: str = "../models/chromadb"
+    CHROMA_COLLECTION_NAME: str = "medical_rag_vi"
+    BM25_INDEX_PATH: str = "../models/bm25_index.pkl"
 
     # FAISS
     FAISS_INDEX_PATH: str = "data/faiss_index.faiss"

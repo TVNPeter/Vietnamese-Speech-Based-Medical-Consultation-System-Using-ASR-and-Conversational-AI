@@ -186,9 +186,15 @@ cython_debug/
 /kenlm.7z
 /vit5.7z
 /text-*.zip
+/data/
+/data.zip
+/models/
+/models.zip
+/backend/data/
 
 # llama-server
 /backend/llama-b9850-bin-win-vulkan-x64
+/backend/llama-server/
 
 # notebooks chores
 notebooks/finetune-wav2vec2/train_set.7z

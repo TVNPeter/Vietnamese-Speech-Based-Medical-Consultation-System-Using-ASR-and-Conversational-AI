@@ -29,19 +29,16 @@ async def _stream_chat(
     rag: RAGService,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events for a chat request."""
-    # Retrieve relevant chunks
     chunks = rag.query(request.message)
     context = "\n\n".join(
-        f"[{i + 1}] (Nguồn: {c.source})\n{c.content}" for i, c in enumerate(chunks)
+        f"[{i + 1}] (Nguồn: {chunk.source})\n{chunk.content}"
+        for i, chunk in enumerate(chunks)
     )
-
-    # Build the user message with context
     user_message = RAG_USER_TEMPLATE.format(
         context=context if context else "Không có tài liệu tham khảo.",
         question=request.message,
     )
 
-    # Send metadata event
     yield _sse_event(
         {
             "type": "metadata",
@@ -49,17 +46,16 @@ async def _stream_chat(
                 "sources": [
                     {
                         "index": i + 1,
-                        "title": c.source,
-                        "content": c.content[:200],
-                        "score": c.score,
+                        "title": chunk.source,
+                        "content": chunk.content[:200],
+                        "score": chunk.score,
                     }
-                    for i, c in enumerate(chunks)
+                    for i, chunk in enumerate(chunks)
                 ],
             },
         }
     )
 
-    # Stream tokens from LLM
     async for token in llm.generate_stream(user_message, SYSTEM_PROMPT):
         yield _sse_event({"type": "token", "content": token})
 
@@ -98,7 +94,7 @@ async def get_stats(rag: RAGService = Depends(get_rag)) -> dict:
 async def reindex_documents(
     rag: RAGService = Depends(get_rag),
 ) -> RAGReindexResponse:
-    """Rebuild vector and BM25 indexes after documents are updated."""
+    """Reload the active prebuilt index or rebuild the configured FAISS index."""
     document_count, chunk_count = await rag.rebuild()
     return RAGReindexResponse(
         document_count=document_count,
