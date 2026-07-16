@@ -4,7 +4,6 @@ import asyncio
 import io
 import json
 import logging
-import os
 import threading
 from pathlib import Path
 
@@ -70,20 +69,17 @@ class ASRService:
         self._hotwords_path = settings.resolve(settings.ASR_HOTWORDS_PATH)
         self._lock = threading.Lock()
         self._asr_model: object | None = None
-        self._vit5_encoder: object | None = None
-        self._vit5_decoder: object | None = None
+        self._vit5_model: object | None = None
         self._ctc_decoder: object | None = None
         self._tokenizer: object | None = None
         self._hotwords: list[str] = []
         self._kenlm_enabled = False
-        self._dll_directory_handles: list[object] = []
 
     def _require_files(self) -> None:
         required_paths = (
             self._model_path / "model.safetensors",
             self._model_path / "vocab.json",
-            self._vit5_path / "encoder_model.onnx",
-            self._vit5_path / "decoder_model.onnx",
+            self._vit5_path / "model.safetensors",
             self._vit5_path / "tokenizer.json",
             self._hotwords_path,
         )
@@ -97,42 +93,21 @@ class ASRService:
 
         self._require_files()
         try:
-            import onnxruntime as ort
             from pyctcdecode import build_ctcdecoder
-            from tokenizers import Tokenizer
             import torch
+            from tokenizers import Tokenizer
+            from transformers import AutoModelForSeq2SeqLM
         except ImportError as error:
             raise RuntimeError(
                 "ASR runtime dependencies are missing. Run `uv sync` in backend/."
             ) from error
 
-        providers = ["CPUExecutionProvider"]
-        if settings.ASR_USE_GPU and "CUDAExecutionProvider" in ort.get_available_providers():
-            dll_directories = []
-            for directory in (
-                settings.ASR_CUDA_DLL_PATH,
-                settings.ASR_CUDNN_DLL_PATH,
-            ):
-                if directory and Path(directory).is_dir() and hasattr(os, "add_dll_directory"):
-                    self._dll_directory_handles.append(os.add_dll_directory(directory))
-                    dll_directories.append(directory)
-            if dll_directories:
-                os.environ["PATH"] = os.pathsep.join(
-                    [*dll_directories, os.environ.get("PATH", "")]
-                )
-            providers.insert(0, "CUDAExecutionProvider")
         device = "cuda" if settings.ASR_WAV2VEC2_USE_GPU and torch.cuda.is_available() else "cpu"
-        logger.info("Loading custom Wav2Vec2 CTC on %s and ViT5 on %s.", device, providers[0])
+        rewrite_device = "cuda" if settings.ASR_USE_GPU and torch.cuda.is_available() else "cpu"
+        logger.info("Loading custom Wav2Vec2 CTC on %s and ViT5 stage 2 on %s.", device, rewrite_device)
         self._asr_model = _custom_wav2vec2_class().from_pretrained(self._model_path).to(device).eval()
-        self._vit5_encoder = ort.InferenceSession(
-            str(self._vit5_path / "encoder_model.onnx"),
-            providers=providers,
-        )
-        self._vit5_decoder = ort.InferenceSession(
-            str(self._vit5_path / "decoder_model.onnx"),
-            providers=providers,
-        )
         self._tokenizer = Tokenizer.from_file(str(self._vit5_path / "tokenizer.json"))
+        self._vit5_model = AutoModelForSeq2SeqLM.from_pretrained(self._vit5_path).to(rewrite_device).eval()
         self._hotwords = self._read_hotwords(self._hotwords_path)
 
         labels = self._load_ctc_labels(self._model_path / "vocab.json")
@@ -256,34 +231,23 @@ class ASRService:
         return " ".join(text.replace("\ue000", "").replace("\ue001", "").split())
 
     def _rewrite_with_vit5(self, text: str) -> str:
-        import numpy as np
+        import torch
 
         if not text:
             return text
+        device = next(self._vit5_model.parameters()).device  # type: ignore[union-attr]
         encoded = self._tokenizer.encode(f"fix_asr: {text}")  # type: ignore[union-attr]
-        input_ids = np.array([encoded.ids], dtype=np.int64)
-        attention_mask = np.ones_like(input_ids, dtype=np.int64)
-        hidden_states = self._vit5_encoder.run(  # type: ignore[union-attr]
-            ["last_hidden_state"],
-            {"input_ids": input_ids, "attention_mask": attention_mask},
-        )[0]
-        generated_ids = [0]
-        for _ in range(settings.ASR_MAX_REWRITE_TOKENS):
-            decoder_ids = np.array([generated_ids], dtype=np.int64)
-            logits = self._vit5_decoder.run(  # type: ignore[union-attr]
-                ["logits"],
-                {
-                    "encoder_attention_mask": attention_mask,
-                    "input_ids": decoder_ids,
-                    "encoder_hidden_states": hidden_states,
-                },
-            )[0]
-            next_token_id = int(logits[0, -1].argmax())
-            if next_token_id == 1:
-                break
-            generated_ids.append(next_token_id)
+        input_ids = torch.tensor([encoded.ids], device=device)
+        attention_mask = torch.ones_like(input_ids)
+        with torch.inference_mode():
+            generated_ids = self._vit5_model.generate(  # type: ignore[union-attr]
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=settings.ASR_MAX_REWRITE_TOKENS,
+                num_beams=4,
+            )
         rewritten = self._tokenizer.decode(  # type: ignore[union-attr]
-            generated_ids[1:], skip_special_tokens=True
+            generated_ids[0].tolist(), skip_special_tokens=True
         ).strip()
         if rewritten.lower().startswith("fix_asr:"):
             rewritten = rewritten[len("fix_asr:") :].lstrip()
